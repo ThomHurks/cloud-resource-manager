@@ -1,4 +1,4 @@
-__author__ = 'thom'
+__author__ = 'Thom Hurks'
 
 import boto3
 
