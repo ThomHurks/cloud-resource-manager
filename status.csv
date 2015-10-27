@@ -1,8 +1,10 @@
-time: 2015-10-27 19:46:54.373099 instanceId: i-5efb1e87 status: ok state: running
-time: 2015-10-27 19:46:54.373600 instanceId: i-528e628b status: ok state: running
-time: 2015-10-27 19:47:54.611645 instanceId: i-5efb1e87 status: ok state: running
-time: 2015-10-27 19:47:54.612145 instanceId: i-528e628b status: ok state: running
-time: 2015-10-27 19:48:54.865693 instanceId: i-5efb1e87 status: ok state: running
-time: 2015-10-27 19:48:54.866193 instanceId: i-528e628b status: ok state: running
-time: 2015-10-27 19:49:55.123742 instanceId: i-5efb1e87 status: ok state: running
-time: 2015-10-27 19:49:55.124242 instanceId: i-528e628b status: ok state: running
+time: 2015-10-27 20:14:22.872385 instance ID: i-5efb1e87 instanceStatus: ok instanceState: running
+time: 2015-10-27 20:14:22.872885 instance ID: i-528e628b instanceStatus: ok instanceState: running
+time: 2015-10-27 20:15:23.095885 instance ID: i-5efb1e87 instanceStatus: ok instanceState: running
+time: 2015-10-27 20:15:23.096385 instance ID: i-528e628b instanceStatus: ok instanceState: running
+time: 2015-10-27 20:16:23.373885 instance ID: i-5efb1e87 instanceStatus: ok instanceState: running
+time: 2015-10-27 20:16:23.374385 instance ID: i-528e628b instanceStatus: ok instanceState: running
+time: 2015-10-27 20:17:23.579885 instance ID: i-5efb1e87 instanceStatus: ok instanceState: running
+time: 2015-10-27 20:17:23.579885 instance ID: i-528e628b instanceStatus: ok instanceState: running
+time: 2015-10-27 20:18:23.789385 instance ID: i-5efb1e87 instanceStatus: ok instanceState: running
+time: 2015-10-27 20:18:23.789885 instance ID: i-528e628b instanceStatus: ok instanceState: running

@@ -27,9 +27,18 @@ while True:
         print(status['InstanceId'])
         with open('status.csv', 'a') as fapp:
             writer = csv.writer(fapp)
-            output = (str('time: ') + str(datetime.datetime.now()))
-            output = (output + ' instanceId: ' + status['InstanceId'])
-            output = (output + ' status: ' + status['InstanceStatus']['Status'])
-            output = (output + ' state: ' + status['InstanceState']['Name'])
+            #time
+            timeNow = datetime.datetime.now()
+            #instance ID
+            instanceId = status['InstanceId']
+            #instance status
+            instanceStatus = status['InstanceStatus']['Status']
+            #instance state
+            instanceState = status['InstanceState']['Name']
+            output = ('time: ' + str(timeNow) + ' instance ID: '+ str(instanceId) + ' instanceStatus: ' + str(instanceStatus) + ' instanceState: ' + str(instanceState))
+            # time = (str('time: ') + str(datetime.datetime.now()))
+            # output = (' instanceId: ' + status['InstanceId'])
+            # output = (output + ' status: ' + status['InstanceStatus']['Status'])
+            # output = (output + ' state: ' + status['InstanceState']['Name'])
             writer.writerow([output])
     time.sleep(60)
