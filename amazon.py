@@ -1,20 +1,12 @@
-__author__ = 'Thom Hurks'
+__author__ = 'Thom Hurks and Sander Kools'
 
 import boto3
 import os
 import time
+import csv
 
 ec2 = boto3.resource('ec2')
 import datetime
-
-def getStatus():
-    i = 0
-    opts = {}
-    for inst in instances:
-        opts[i] = (inst.id, inst.instance_type, inst.public_dns_name, inst.launch_time)
-        print('current time: ' + str(datetime.datetime.now()) + '  instance: ' + "%d:" % i + " %s - %s : %s (Running since: %s)" % opts[i])
-        i += 1
-
 
 print('Default region:')
 for instance in ec2.instances.all():
@@ -30,6 +22,9 @@ for status in ec2.meta.client.describe_instance_status()['InstanceStatuses']:
 
 print("\nCurrently running instances:")
 
+
 while True:
-        getStatus()
-        time.sleep(60)
+    #get status, if status is impaired, insufficient-data or not-applicable, than reboot.
+    for status in ec2.meta.client.describe_instance_status()['InstanceStatuses']:
+        print(status)
+    time.sleep(60)
