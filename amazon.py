@@ -21,10 +21,15 @@ for status in ec2.meta.client.describe_instance_status()['InstanceStatuses']:
     print(status)
 
 print("\nCurrently running instances:")
-
-
 while True:
     #get status, if status is impaired, insufficient-data or not-applicable, than reboot.
     for status in ec2.meta.client.describe_instance_status()['InstanceStatuses']:
-        print(status)
+        print(status['InstanceId'])
+        with open('status.csv', 'a') as fapp:
+            writer = csv.writer(fapp)
+            output = (str('time: ') + str(datetime.datetime.now()))
+            output = (output + ' instanceId: ' + status['InstanceId'])
+            output = (output + ' status: ' + status['InstanceStatus']['Status'])
+            output = (output + ' state: ' + status['InstanceState']['Name'])
+            writer.writerow([output])
     time.sleep(60)
