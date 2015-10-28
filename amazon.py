@@ -9,10 +9,13 @@ ec2 = boto3.resource('ec2')
 
 print('Default region:')
 print('connecting with instances')
+
 instances = ec2.instances.all()
 
-
 accepted_status = {'ok', 'initializing'}
+
+print('Done')
+
 
 def checkPossibleInstances():
     # possible state: pending | running | shutting-down | terminated | stopping | stopped
@@ -30,11 +33,21 @@ def controlStatus():
         for status in ec2.meta.client.describe_instance_status()['InstanceStatuses']:
             if status['InstanceId'] == instance.id:
                 if status['InstanceStatus']['Status'] not in accepted_status:
-                    print('something wrong, rebooting')
+                    print('something is wrong, rebooting')
                     instance.reboot()
 
 
+# when the need for an extra instance arises, start an instance that is turned off
+def addInstance():
+    # possible state: pending | running | shutting-down | terminated | stopping | stopped
+    # if stopped it can be started, print it.
+    for instance in instances:
+        print(instance.state['Name'])
+        if instance.state['Name'] == 'stopped':
+            instance.start()
+
 while True:
+    print('busy')
     for inst in instances:
         # time
         timeNow = datetime.datetime.now()
@@ -48,21 +61,14 @@ while True:
             for status in ec2.meta.client.describe_instance_status()['InstanceStatuses']:
                 if status['InstanceId'] == inst.id:
                     instanceStatus = status['InstanceStatus']['Status']
-
         else:
-            instanceStatus = 'instance is not running'
-
-
-        controlStatus()
-        checkPossibleInstances()
+            instanceStatus = 'not running'
 
         with open('status.csv', 'a') as f:
             writer = csv.writer(f)
-            output = ('time: ' + str(timeNow) + ' instance ID: ' + str(instanceId) + ' instanceStatus: ' + str(
-                instanceStatus) + ' instanceState: ' + str(instanceState))
-            # time = (str('time: ') + str(datetime.datetime.now()))
-            # output = (' instanceId: ' + status['InstanceId'])
-            # output = (output + ' status: ' + status['InstanceStatus']['Status'])
-            # output = (output + ' state: ' + status['InstanceState']['Name'])
+            output = ('time: ' + str(timeNow) + ' instance ID: ' + str(instanceId) + ' instanceState: ' +
+                      str(instanceState) + ' instanceStatus: ' + str(instanceStatus))
             writer.writerow([output])
+    controlStatus()
+    addInstance()
     time.sleep(60)
