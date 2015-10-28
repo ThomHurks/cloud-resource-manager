@@ -45,6 +45,16 @@ def addInstance():
         print(instance.state['Name'])
         if instance.state['Name'] == 'stopped':
             instance.start()
+            break
+
+def stopInstance():
+    # possible state: pending | running | shutting-down | terminated | stopping | stopped
+    # if stopped it can be started, print it.
+    for instance in instances:
+        print(instance.state['Name'])
+        if instance.state['Name'] == 'running':
+            instance.stop()
+            break
 
 while True:
     print('busy')
@@ -71,4 +81,5 @@ while True:
             writer.writerow([output])
     controlStatus()
     addInstance()
+    stopInstance()
     time.sleep(60)
