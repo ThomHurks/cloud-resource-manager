@@ -1,5 +1,7 @@
+import datetime
+
 s = []
-FILE = open("triangle.txt", "r")
+FILE = open("triangle9.txt", "r")
 for blob in FILE: s.append([int(i) for i in blob.split(" ")])
 
 # for line in open("triangle.txt").read().strip().split('\n'):
@@ -29,4 +31,6 @@ def sum(s,r,c):
         return max(sm)
     return 0
 
+print(datetime.datetime.now())
 print(sum(s,0,0))
+print(datetime.datetime.now())
