@@ -12,14 +12,12 @@ import controlStatus
 
 ec2 = boto3.resource('ec2')
 s3 = boto3.resource('s3')
-sqs_resource = boto3.resource('sqs')
-sqs = sqs_resource.meta.client
+sqs = boto3.resource('sqs')
 
 print('Default region:')
 print('connecting with instances')
 
 instances = ec2.instances.all()
-
 
 # #create a bucket
 def createBucket(bucketName):
@@ -29,10 +27,6 @@ def createBucket(bucketName):
 def uploadToBucket(bucketName, file):
     s3.Object(bucket_name=bucketName, key=file).put(Body=open(file, 'rb'))
 # createBucket('bucket32')
-
-for bucket in s3.buckets.all():
-    for key in bucket.objects.all():
-        print(key.key)
 
 # obj = s3.Object(bucket_name='bucket20', key='test.py')
 # upload to a specific bucket
@@ -50,14 +44,23 @@ for bucket in s3.buckets.all():
 # response = sqs.send_message(QueueUrl='https://us-west-2.queue.amazonaws.com/853377774032/computetest', MessageBody='Hello World')
 
 queue = sqs.get_queue_by_name(QueueName='computetest')
-queue.send_message(MessageBody='boto3'’, MessageAttributes={'Author': {'StringValue': 'Daniel','DataType': 'string'
-}
-})
+queue.send_message(MessageBody='boto3', MessageAttributes={'Author': {'StringValue': 'Sander', 'DataType': 'String'}})
+
+# Process messages by printing out body and optional author name
+for message in queue.receive_messages(MessageAttributeNames=['Author']):
+    print(message)
+    # Get the custom author message attribute if it was set
+    author_text = ''
+    if message.message_attributes is not None:
+        author_name = message.message_attributes.get('Author')
+        if author_name:
+            author_text = ' ({0})'.format(author_name)
+            # Print out the body and author (if set)
+            print('Hello, {0}!{1}'.format(message.body, author_name))
+            #  Let the queue know that the message is processed
+            message.delete()
 
 
-response = sqs.list_queues()
-for url in response.get('QueueUrls', []):
-    print(url)
 
 def checkPossibleInstances():
     # possible state: pending | running | shutting-down | terminated | stopping | stopped
