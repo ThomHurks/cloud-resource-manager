@@ -10,13 +10,13 @@ sqs = boto3.resource('sqs')
 print('get instances')
 instances = ec2.instances.all()
 
+
 for instance in instances:
     instanceId = instance.id
     instancepublicDNS = instance.public_dns_name
 
 
-print(instanceId)
-print(instancepublicDNS)
+
 locationToKey = "D:\Documents\Github\gridAndCloud\key\Grabot.pem"
 scriptToRun = "python test.py"
 uploadScript = "test.py"
