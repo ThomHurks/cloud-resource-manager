@@ -8,6 +8,7 @@ import botocore
 import addInstance
 import stopInstance
 import controlStatus
+from subprocess import call
 
 
 ec2 = boto3.resource('ec2')
@@ -19,6 +20,9 @@ print('connecting with instances')
 
 instances = ec2.instances.all()
 
+for instance in instances:
+    print(instance.public_dns_name)
+
 # #create a bucket
 def createBucket(bucketName):
     s3.create_bucket(Bucket=bucketName)
@@ -28,38 +32,7 @@ def uploadToBucket(bucketName, file):
     s3.Object(bucket_name=bucketName, key=file).put(Body=open(file, 'rb'))
 # createBucket('bucket32')
 
-# obj = s3.Object(bucket_name='bucket20', key='test.py')
-# upload to a specific bucket
-# uploadToBucket('bucket32', 'test.py')
-# obj = s3.Object(bucket_name='bucket31', key='test.py').put(Body=open('test.py', 'rb'))
-# obj = s3.Object(bucket_name='bucket31', key='triangle3.txt').put(Body=open('triangle3.txt', 'rb'))
-
-# queue = sqs.create_queue(QueueName='computetest', Attributes={'DelaySeconds': '5'})
-# queue = sqs.Queue(url='https://us-west-2.queue.amazonaws.com/853377774032/computetest')
-# print(queue.url)
-# print(queue.attributes.get('DelaySeconds'))
-#
-# queue.send_message(MessageBody='hello')
-
-# response = sqs.send_message(QueueUrl='https://us-west-2.queue.amazonaws.com/853377774032/computetest', MessageBody='Hello World')
-
-queue = sqs.get_queue_by_name(QueueName='computetest')
-queue.send_message(MessageBody='boto3', MessageAttributes={'Author': {'StringValue': 'Sander', 'DataType': 'String'}})
-
-# Process messages by printing out body and optional author name
-for message in queue.receive_messages(MessageAttributeNames=['Author']):
-    print(message)
-    # Get the custom author message attribute if it was set
-    author_text = ''
-    if message.message_attributes is not None:
-        author_name = message.message_attributes.get('Author')
-        if author_name:
-            author_text = ' ({0})'.format(author_name)
-            # Print out the body and author (if set)
-            print('Hello, {0}!{1}'.format(message.body, author_name))
-            #  Let the queue know that the message is processed
-            message.delete()
-
+call(["ssh", "-i", "D:\Documents\Github\gridAndCloud\key\Grabot.pem", "ec2-user@ec2-52-26-179-116.us-west-2.compute.amazonaws.com", "python test.py"])
 
 
 def checkPossibleInstances():

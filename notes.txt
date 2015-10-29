@@ -1,0 +1,6 @@
+#upload a file on ec2 (while in the correct directory)
+scp -i D:\Documents\Github\gridAndCloud\key\Grabot.pem *file* ec2-user@ec2-52-26-179-116.us-west-2.compute.amazonaws.com:*file*
+
+#run script on ec2
+ssh -i D:\Documents\Github\gridAndCloud\key\Grabot.pem ec2-user@ec2-52-26-179-116.us-west-2.compute.amazonaws.com *script*
+

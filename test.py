@@ -1,7 +1,7 @@
 import datetime
 
 s = []
-FILE = open("triangle9.txt", "r")
+FILE = open("triangle.txt", "r")
 for blob in FILE: s.append([int(i) for i in blob.split(" ")])
 
 # for line in open("triangle.txt").read().strip().split('\n'):
