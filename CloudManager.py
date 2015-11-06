@@ -21,6 +21,7 @@ def ParseArgs():
     parser.add_argument('--pemfile', action='store', required=False, type=ExistingFile, help='The location of the PEM file to use for remote authentication.', metavar='pemfile')
     return parser.parse_args()
 
+
 def GetInstances(ec2):
     instances = ec2.instances.all()
     instanceCount = 0
@@ -29,18 +30,7 @@ def GetInstances(ec2):
         instanceCount += 1
         stateName = instance.state['Name']
         instanceData[instance.id] = (instance.public_dns_name, instance.state['Name'])
-        if stateName == 'pending':
-            print("Instance with ID %s has state Pending." % instance.id)
-        elif stateName == 'running':
-            print("Instance with ID %s has state Running." % instance.id)
-        elif stateName == 'shutting-down':
-            print("Instance with ID %s has state Shutting Down." % instance.id)
-        elif stateName == 'terminated':
-            print("Instance with ID %s has state Terminated." % instance.id)
-        elif stateName == 'stopping':
-            print("Instance with ID %s has state Stopping." % instance.id)
-        elif stateName == 'stopped':
-            print("Instance with ID %s has state Stopped." % instance.id)
+        print("Instance with ID %s has state %s." % (instance.id, stateName))
     print("Discovered a total of %d instances." % instanceCount)
     return instanceData, instanceCount
 
