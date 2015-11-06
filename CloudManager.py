@@ -19,6 +19,10 @@ def ExistingFile(filename):
 def ParseArgs():
     parser = argparse.ArgumentParser(description='Run the Simple Cloud Manager.')
     parser.add_argument('--pemfile', action='store', required=False, type=ExistingFile, help='The location of the PEM file to use for remote authentication.', metavar='pemfile')
+    parser.add_argument('--ssc', action='store', required=False, type=ExistingFile, help='The location of the SSC algorithm.', metavar='ssc')
+    parser.add_argument('--nrofinstances', action='store', required=False, type=int, help='The nr of instances that should be launched.', metavar='nrofinstances')
+    parser.add_argument('--inputgraph', action='store', required=False, type=ExistingFile, help='The input graph in text format.', metavar='inputgraph')
+
     return parser.parse_args()
 
 
@@ -86,6 +90,11 @@ def ExecuteLocalCommand(command):
         print("The executed command '%s' exceeded the timout value: %s!" % (e.cmd, str(e.timeout)))
 
 
+def ExecuteLocalSSCAlgorithm(SSC_program, input_graph, nrOfInstances):
+    ExecuteLocalCommand("%s --overwrite preprocess %s graph.pickle sourcevertices.pickle --nrofvertexfiles %d" %
+                        (SSC_program, input_graph, nrOfInstances))
+
+
 def CopyFileToRemote(filename, host, pemfile, username='ec2-user'):
     try:
         ExecuteLocalCommand("scp -i %s %s %s@%s:~/ " % (pemfile, filename, username, host))
@@ -116,6 +125,7 @@ def Main():
     (instanceData, instanceCount) = GetInstances(ec2)
     impairedInstances = GetImpairedInstances(ec2_client)
     print(impairedInstances)
+    ExecuteLocalSSCAlgorithm(args.ssc, args.inputgraph, args.nrofinstances)
     for key, (dns, status) in instanceData.items():
         if status == 'running':
             CopyFileToRemote("test.txt", dns, args.pemfile)
