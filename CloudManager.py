@@ -5,6 +5,8 @@ from botocore.exceptions import ClientError
 from paramiko import *
 import argparse
 import subprocess
+import time
+import sys
 
 __author__ = 'Thom Hurks'
 
@@ -33,7 +35,7 @@ def GetInstances(ec2):
     for instance in instances:
         instanceCount += 1
         stateName = instance.state['Name']
-        instanceData[instance.id] = (instance.public_dns_name, instance.state['Name'])
+        instanceData[instance.id] = (instance.public_dns_name, stateName, instance)
         print("Instance with ID %s has state %s." % (instance.id, stateName))
     print("Discovered a total of %d instances." % instanceCount)
     return instanceData, instanceCount
@@ -42,24 +44,43 @@ def GetInstances(ec2):
 def GetRunningHosts(ec2):
     hostnames = []
     (instanceData, instanceCount) = GetInstances(ec2)
-    for key, (host, state) in instanceData.items():
+    for key, (host, state, instance) in instanceData.items():
         if state == 'running':
             hostnames.append(host)
     return hostnames
 
 
-def CreateNewInstances(ec2, nr, createRealInstance=False):
+def EnsureAllHostsRunning(ec2, ec2_client, waitUntilRunning=False):
+    (instanceData, instanceCount) = GetInstances(ec2)
+    for key, (host, state, instance) in instanceData.items():
+        if state != 'running' and state != 'pending' and state != 'terminated':  # shutting-down | stopping | stopped
+            instance.reboot()
+            if waitUntilRunning:
+                curState = instance.state['Name']
+                while curState != 'running':
+                    print("State of new instance %s is currently %s" % (instance.id, curState))
+                    time.sleep(5)
+                    curState = ec2_client.describe_instance_status(InstanceIds=[instance.id])['InstanceStatuses']['InstanceState']['Name']
+            print("Rebooted existing instance: '%s'" % str(instance))
+
+
+def CreateNewInstances(ec2, nr, waitUntilCreated=False, createRealInstance=False):
     succceeded = False
     results = None
     try:
-        results = ec2.create_instances(ImageId='ami-daaeaec7', MinCount=nr, MaxCount=nr,
+        results = ec2.create_instances(ImageId='ami-91c5d6fd', MinCount=nr, MaxCount=nr,
                                        SecurityGroups=['launch-wizard-1'], InstanceType="t2.micro",
                                        Placement={'AvailabilityZone': 'eu-central-1b'},
                                        KeyName='amazon', DryRun=(not createRealInstance))
         if results is not None and len(results) > 0:
+            for newInstance in results:
+                if waitUntilCreated:
+                    while newInstance.state['Name'] != 'running':
+                        print("State of new instance %s is currently %s" % (newInstance.id, newInstance.state['Name']))
+                        time.sleep(5)
+                        newInstance.update()
+                print("Created new instance: '%s'" % str(newInstance))
             succceeded = True
-            for result in results:
-                print("Result is: %s" % str(result))
     except ClientError as e:
         errorCode = e.response['Error']['Code']
         if errorCode == 'DryRunOperation':
@@ -71,7 +92,24 @@ def CreateNewInstances(ec2, nr, createRealInstance=False):
     return succceeded, results
 
 
-def ExecuteRemoteCommand(command, hostname, pemfile, username='ec2-user'):
+def EnsureEnoughInstances(ec2, nrOfInstances, waitUntilCreated=False, createRealInstances=False):
+    runningHosts = GetRunningHosts(ec2)
+    extraRequired = nrOfInstances - len(runningHosts)
+    if extraRequired > 0:
+        (succceeded, results) = CreateNewInstances(ec2, extraRequired, waitUntilCreated, createRealInstances)
+        if succceeded:
+            if results is not None:
+                for result in results:
+                    print("Not enough instances. Added instance: '%s'" % str(result))
+            else:
+                print("No instances actually added. This was probably a dry run.")
+        else:
+            print("Couldn't ensure the required number of instances!")
+    else:
+        print("Already enough instances!")
+
+
+def ExecuteRemoteCommand(command, hostname, pemfile, waitUntilDone=False, username='ec2-user'):
     try:
         client = SSHClient()
         client.load_system_host_keys()
@@ -80,10 +118,15 @@ def ExecuteRemoteCommand(command, hostname, pemfile, username='ec2-user'):
                        username=str(username),
                        key_filename=str(pemfile))
         print("Executing command '%s' on host '%s'" % (command, hostname))
-        stdin, stdout, stderr = client.exec_command(str(command))
-        lines = stdout.read().splitlines()
-        for line in lines:
-            print(line.decode("utf-8"))
+        if waitUntilDone:
+            (stdin, stdout, stderr) = client.exec_command(command)
+            lines = stdout.read().splitlines()
+            for line in lines:
+                print(line.decode("utf-8"))
+        else:
+            channel = client.get_transport().open_session()
+            channel.exec_command(command)
+            return client, channel
     except (BadHostKeyException, AuthenticationException, SSHException, IOError) as e:
         print("Error connecting to instance with error: %s." % str(e))
 
@@ -141,16 +184,40 @@ def DistributeSourceVertices(ec2, nrOfInstances, pemfile, vertexfile="sourcevert
         print("Could not find all required source vertex files!")
 
 
-def StartComputations(ec2, nrOfInstances, pemfile, graphfile, vertexfile):
+def PerformComputations(ec2, nrOfInstances, pemfile, graphfile, vertexfile):
     hostnames = GetRunningHosts(ec2)
+    success = True
     if len(hostnames) >= nrOfInstances:
         command = "./SSC12.py --overwrite compute output.txt preprocessed %s %s" % (graphfile, vertexfile)
+        progress = []
         for host in hostnames:
-            ExecuteRemoteCommand("chmod +x SSC12.py", host, pemfile)
-            ExecuteRemoteCommand(command, host, pemfile)
+            ExecuteRemoteCommand("rm -f output.txt", host, pemfile, waitUntilDone=True)
+            ExecuteRemoteCommand("chmod +x SSC12.py", host, pemfile, waitUntilDone=True)
+            (client, channel) = ExecuteRemoteCommand(command, host, pemfile, waitUntilDone=False)
+            if channel is not None:
+                progress.append((host, client, channel))
+        while len(progress) > 0:
+            for (host, client, channel) in progress:
+                if not channel.exit_status_ready():
+                    print("Printing output for host %s:" % host)
+                    print(channel.recv(sys.maxsize).decode("utf-8"))
+                else:
+                    exitCode = channel.recv_exit_status()
+                    print("Host %s had exit code %d" % (host, exitCode))
+                    if exitCode != 0:
+                        success = False
+                        print("Computation encountered an error on host %s!" % host)
+                    progress.remove((host, client, channel))
+            print("Waiting...")
+            time.sleep(1)
     else:
+        success = False
         print("Not enough hosts to start all computations!")
+    return success
 
+
+def GatherResults():
+    print("Implement this please.")
 
 
 def GetImpairedInstances(ec2_client):
@@ -167,23 +234,32 @@ def GetImpairedInstances(ec2_client):
         return None
 
 
+def ShowAllRemoteFiles(ec2, pemfile):
+    print("Showing the files present on all running instances.")
+    (instanceData, instanceCount) = GetInstances(ec2)
+    for key, (dns, status, instance) in instanceData.items():
+        if status == 'running':
+            ExecuteRemoteCommand("ls", dns, pemfile, waitUntilDone=True)
+
+
 def Main():
     args = ParseArgs()
     ec2 = boto3.resource('ec2')
     ec2_client = boto3.client('ec2')
-    (succceeded, results) = CreateNewInstances(ec2, 1, False)
-    print("CreateNewInstances success: %r. And with results: %s" % (succceeded, results))
-    (instanceData, instanceCount) = GetInstances(ec2)
-    impairedInstances = GetImpairedInstances(ec2_client)
-    print(impairedInstances)
+    EnsureAllHostsRunning(ec2, ec2_client, waitUntilRunning=True)
+    GetImpairedInstances(ec2_client)
+    EnsureEnoughInstances(ec2, args.nrofinstances, waitUntilCreated=True, createRealInstances=True)
     ExecuteLocalSSCAlgorithm(args.ssc, args.inputgraph, args.nrofinstances)
     DistributeFileToHosts(ec2, args.nrofinstances, args.pemfile, "graph.pickle")
     DistributeSourceVertices(ec2, args.nrofinstances, args.pemfile)
     DistributeFileToHosts(ec2, args.nrofinstances, args.pemfile, args.ssc)
-    StartComputations(ec2, args.nrofinstances, args.pemfile, "graph.pickle", "sourcevertices.pickle")
-    for key, (dns, status) in instanceData.items():
-        if status == 'running':
-            ExecuteRemoteCommand("ls", dns, args.pemfile)
+    if PerformComputations(ec2, args.nrofinstances, args.pemfile, "graph.pickle", "sourcevertices.pickle"):
+        print("All computations done succesfully.")
+        GatherResults()
+    else:
+        print("Some computation went wrong!")
+        exit(1)
+    ShowAllRemoteFiles(ec2, args.pemfile)
 
 
 if __name__ == "__main__":
