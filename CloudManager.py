@@ -39,6 +39,15 @@ def GetInstances(ec2):
     return instanceData, instanceCount
 
 
+def GetRunningHosts(ec2):
+    hostnames = []
+    (instanceData, instanceCount) = GetInstances(ec2)
+    for key, (host, state) in instanceData.items():
+        if state == 'running':
+            hostnames.append(host)
+    return hostnames
+
+
 def CreateNewInstances(ec2, nr, createRealInstance=False):
     succceeded = False
     results = None
@@ -95,11 +104,53 @@ def ExecuteLocalSSCAlgorithm(SSC_program, input_graph, nrOfInstances):
                         (SSC_program, input_graph, nrOfInstances))
 
 
-def CopyFileToRemote(filename, host, pemfile, username='ec2-user'):
+def CopyFileToRemote(filename, host, pemfile, username='ec2-user', targetfilename=""):
     try:
-        ExecuteLocalCommand("scp -i %s %s %s@%s:~/ " % (pemfile, filename, username, host))
+        ExecuteLocalCommand("scp -i %s %s %s@%s:~/%s" % (pemfile, filename, username, host, targetfilename))
     except FileNotFoundError:
         print("Couldn't find file '%s' which you wanted to copy!" % filename)
+
+
+def DistributeFileToHosts(ec2, nrOfInstances, pemfile, filename):
+    if os.path.isfile(filename):
+        hostnames = GetRunningHosts(ec2)
+        if len(hostnames) < nrOfInstances:
+            print("Not enough hosts are running!")
+        else:
+            for host in hostnames:
+                CopyFileToRemote(filename, host, pemfile)
+    else:
+        print("The file '%s' does not exist!" % filename)
+
+
+def DistributeSourceVertices(ec2, nrOfInstances, pemfile, vertexfile="sourcevertices.pickle"):
+    (filename, extension) = os.path.splitext(vertexfile)
+    vertexFiles = []
+    for i in range(0, nrOfInstances):
+        subfile = filename + "_" + str(i) + extension
+        if os.path.isfile(subfile):
+            vertexFiles.append(subfile)
+    if len(vertexFiles) == nrOfInstances:
+        hostnames = GetRunningHosts(ec2)
+        if len(hostnames) < nrOfInstances:
+            print("Not enough hosts are running!")
+        else:
+            for i, subfile in enumerate(vertexFiles):
+                CopyFileToRemote(subfile, hostnames[i], pemfile, targetfilename=vertexfile)
+    else:
+        print("Could not find all required source vertex files!")
+
+
+def StartComputations(ec2, nrOfInstances, pemfile, graphfile, vertexfile):
+    hostnames = GetRunningHosts(ec2)
+    if len(hostnames) >= nrOfInstances:
+        command = "./SSC12.py --overwrite compute output.txt preprocessed %s %s" % (graphfile, vertexfile)
+        for host in hostnames:
+            ExecuteRemoteCommand("chmod +x SSC12.py", host, pemfile)
+            ExecuteRemoteCommand(command, host, pemfile)
+    else:
+        print("Not enough hosts to start all computations!")
+
 
 
 def GetImpairedInstances(ec2_client):
@@ -126,10 +177,13 @@ def Main():
     impairedInstances = GetImpairedInstances(ec2_client)
     print(impairedInstances)
     ExecuteLocalSSCAlgorithm(args.ssc, args.inputgraph, args.nrofinstances)
+    DistributeFileToHosts(ec2, args.nrofinstances, args.pemfile, "graph.pickle")
+    DistributeSourceVertices(ec2, args.nrofinstances, args.pemfile)
+    DistributeFileToHosts(ec2, args.nrofinstances, args.pemfile, args.ssc)
+    StartComputations(ec2, args.nrofinstances, args.pemfile, "graph.pickle", "sourcevertices.pickle")
     for key, (dns, status) in instanceData.items():
         if status == 'running':
-            CopyFileToRemote("test.txt", dns, args.pemfile)
-            ExecuteRemoteCommand("less test.txt", dns, args.pemfile)
+            ExecuteRemoteCommand("ls", dns, args.pemfile)
 
 
 if __name__ == "__main__":
