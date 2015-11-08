@@ -192,25 +192,33 @@ def DistributeSourceVertices(ec2, targetHosts, nrOfInstances, pemfile, vertexfil
         if len(targetHosts) < nrOfInstances:
             print("Not enough hosts are running!")
         else:
+            hostToFile = dict()
             for i, subfile in enumerate(vertexFiles):
                 CopyFileToRemote(subfile, targetHosts[i], pemfile, targetfilename=vertexfile)
+                hostToFile[targetHosts[i]] = subfile
+            return hostToFile
     else:
         print("Could not find all required source vertex files!")
 
 
-def PerformComputations(ec2, nrOfInstances, pemfile, graphfile, vertexfile):
-    hostnames = GetRunningHosts(ec2)
+def StartRemoteSSCComputation(command, host, pemfile):
+    ExecuteRemoteCommand("rm -f output.txt", host, pemfile, waitUntilDone=True)
+    ExecuteRemoteCommand("chmod +x SSC12.py", host, pemfile, waitUntilDone=True)
+    (client, channel) = ExecuteRemoteCommand(command, host, pemfile, waitUntilDone=False)
+    if channel is not None:
+        return client, channel
+
+
+def PerformComputations(ec2, hostToFile, nrOfInstances, pemfile, graphfile, vertexfile):
     success = True
-    if len(hostnames) >= nrOfInstances:
+    if len(hostToFile) >= nrOfInstances:
         command = "./SSC12.py --overwrite compute output.txt preprocessed %s %s" % (graphfile, vertexfile)
         progress = []
-        for host in hostnames:
-            ExecuteRemoteCommand("rm -f output.txt", host, pemfile, waitUntilDone=True)
-            ExecuteRemoteCommand("chmod +x SSC12.py", host, pemfile, waitUntilDone=True)
-            (client, channel) = ExecuteRemoteCommand(command, host, pemfile, waitUntilDone=False)
+        for (host, subfile) in hostToFile.items():
+            (client, channel) = StartRemoteSSCComputation(command, host, pemfile)
             if channel is not None:
                 progress.append((host, client, channel))
-        while len(progress) > 0:
+        while True:
             for (host, client, channel) in progress:
                 if not channel.exit_status_ready():
                     print("Printing output for host %s:" % host)
@@ -218,12 +226,22 @@ def PerformComputations(ec2, nrOfInstances, pemfile, graphfile, vertexfile):
                 else:
                     exitCode = channel.recv_exit_status()
                     print("Host %s had exit code %d" % (host, exitCode))
-                    if exitCode != 0:
-                        success = False
-                        print("Computation encountered an error on host %s!" % host)
                     progress.remove((host, client, channel))
-            print("Waiting...")
-            time.sleep(1)
+                    if exitCode != 0:
+                        print("Computation encountered an error on host %s!" % host)
+                        (client, channel) = StartRemoteSSCComputation(command, host, pemfile)
+                        if channel is not None:
+                            print("Restarted the failed computation on host %s" % host)
+                            progress.append((host, client, channel))
+                        else:
+                            print("Couldn't restart failed computation.")
+                            success = False
+                            break
+            if len(progress) > 0:
+                print("Waiting...")
+                time.sleep(1)
+            else:
+                break
     else:
         success = False
         print("Not enough hosts to start all computations!")
@@ -295,17 +313,19 @@ def Main():
     EnsureEnoughInstances(ec2, args.nrofinstances, waitUntilCreated=True, createRealInstances=True)
     ExecuteLocalSSCAlgorithm(args.ssc, args.inputgraph, args.nrofinstances)
     targetHosts = DistributeFileToHosts(ec2, args.nrofinstances, args.pemfile, "graph.pickle")
-    DistributeSourceVertices(ec2, targetHosts, args.nrofinstances, args.pemfile)
-    DistributeFileToHosts(ec2, args.nrofinstances, args.pemfile, args.ssc, targetHosts)
-    if PerformComputations(ec2, args.nrofinstances, args.pemfile, "graph.pickle", "sourcevertices.pickle"):
-        print("All computations done succesfully.")
-        GatherResults(targetHosts, "output.txt", "output.txt", args.pemfile)
-        endTime = timer()
-        elapsed = endTime - startTime
-        print("Time elapsed: %s" % str(elapsed))
-    else:
-        print("Some computation went wrong!")
-        exit(1)
+    if targetHosts is not None:
+        hostToFile = DistributeSourceVertices(ec2, targetHosts, args.nrofinstances, args.pemfile)
+        if hostToFile is not None:
+            DistributeFileToHosts(ec2, args.nrofinstances, args.pemfile, args.ssc, targetHosts)
+            if PerformComputations(ec2, hostToFile, args.nrofinstances, args.pemfile, "graph.pickle", "sourcevertices.pickle"):
+                print("All computations done succesfully.")
+                GatherResults(targetHosts, "output.txt", "output.txt", args.pemfile)
+                endTime = timer()
+                elapsed = endTime - startTime
+                print("Time elapsed: %s" % str(elapsed))
+            else:
+                print("Some computation went wrong!")
+                exit(1)
     ShowAllRemoteFiles(ec2, args.pemfile)
 
 
