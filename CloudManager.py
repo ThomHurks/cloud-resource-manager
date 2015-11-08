@@ -8,6 +8,7 @@ import subprocess
 import time
 import sys
 import fileinput
+from timeit import default_timer as timer
 
 __author__ = 'Thom Hurks'
 
@@ -248,7 +249,7 @@ def GatherResults(targetHosts, filename, outputFilename, pemfile):
         print(copiedFiles)
 
 
-def GetImpairedInstances(ec2_client):
+def RebootImpairedInstances(ec2_client, ec2, waitUntilRunning=False):
     impairedInstances = []
     statuses = ec2_client.describe_instance_status()['InstanceStatuses']
     for status in statuses:
@@ -256,10 +257,24 @@ def GetImpairedInstances(ec2_client):
             impairedInstances.append(status['InstanceId'])
     if len(impairedInstances) > 0:
         print("%d impaired instances found!" % len(impairedInstances))
-        return impairedInstances
+        (instanceData, instanceCount) = GetInstances(ec2)
+        for key, (host, state, instance) in instanceData.items():
+            if key in impairedInstances:
+                instance.reboot()
+                print("Rebooted impaired instance %s" % key)
+        if waitUntilRunning:
+            while True:
+                for impairedInstance in impairedInstances:
+                    curState = ec2_client.describe_instance_status(InstanceIds=[impairedInstance])['InstanceStatuses']['InstanceState']['Name']
+                    if curState == 'running' or curState == 'terminated':
+                        impairedInstances.remove(impairedInstance)
+                if len(impairedInstances) == 0:
+                    break
+                else:
+                    time.sleep(5)
+            print("All rebooted impaired instances are now running!")
     else:
         print("All running instances are healthy.")
-        return None
 
 
 def ShowAllRemoteFiles(ec2, pemfile):
@@ -274,8 +289,9 @@ def Main():
     args = ParseArgs()
     ec2 = boto3.resource('ec2')
     ec2_client = boto3.client('ec2')
+    startTime = timer()
     EnsureAllHostsRunning(ec2, ec2_client, waitUntilRunning=True)
-    GetImpairedInstances(ec2_client)
+    RebootImpairedInstances(ec2_client, ec2, waitUntilRunning=True)
     EnsureEnoughInstances(ec2, args.nrofinstances, waitUntilCreated=True, createRealInstances=True)
     ExecuteLocalSSCAlgorithm(args.ssc, args.inputgraph, args.nrofinstances)
     targetHosts = DistributeFileToHosts(ec2, args.nrofinstances, args.pemfile, "graph.pickle")
@@ -284,6 +300,9 @@ def Main():
     if PerformComputations(ec2, args.nrofinstances, args.pemfile, "graph.pickle", "sourcevertices.pickle"):
         print("All computations done succesfully.")
         GatherResults(targetHosts, "output.txt", "output.txt", args.pemfile)
+        endTime = timer()
+        elapsed = endTime - startTime
+        print("Time elapsed: %s" % str(elapsed))
     else:
         print("Some computation went wrong!")
         exit(1)
