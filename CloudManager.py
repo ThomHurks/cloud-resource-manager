@@ -7,6 +7,7 @@ import argparse
 import subprocess
 import time
 import sys
+import fileinput
 
 __author__ = 'Thom Hurks'
 
@@ -154,19 +155,32 @@ def CopyFileToRemote(filename, host, pemfile, username='ec2-user', targetfilenam
         print("Couldn't find file '%s' which you wanted to copy!" % filename)
 
 
-def DistributeFileToHosts(ec2, nrOfInstances, pemfile, filename):
+def CopyFileToLocal(filename, host, pemfile, username='ec2-user', targetfilename="."):
+    try:
+        ExecuteLocalCommand("scp -i %s %s@%s:~/%s %s" % (pemfile, username, host, filename, targetfilename))
+        if os.path.isfile(targetfilename):
+            return targetfilename
+    except FileNotFoundError:
+        print("Couldn't find file '%s' which you wanted to copy!" % filename)
+
+
+def DistributeFileToHosts(ec2, nrOfInstances, pemfile, filename, hostnames=None):
     if os.path.isfile(filename):
-        hostnames = GetRunningHosts(ec2)
+        if hostnames is None or len(hostnames) == 0:
+            hostnames = GetRunningHosts(ec2)
         if len(hostnames) < nrOfInstances:
             print("Not enough hosts are running!")
         else:
+            targetHosts = []
             for host in hostnames:
                 CopyFileToRemote(filename, host, pemfile)
+                targetHosts.append(host)
+            return targetHosts
     else:
         print("The file '%s' does not exist!" % filename)
 
 
-def DistributeSourceVertices(ec2, nrOfInstances, pemfile, vertexfile="sourcevertices.pickle"):
+def DistributeSourceVertices(ec2, targetHosts, nrOfInstances, pemfile, vertexfile="sourcevertices.pickle"):
     (filename, extension) = os.path.splitext(vertexfile)
     vertexFiles = []
     for i in range(0, nrOfInstances):
@@ -174,12 +188,11 @@ def DistributeSourceVertices(ec2, nrOfInstances, pemfile, vertexfile="sourcevert
         if os.path.isfile(subfile):
             vertexFiles.append(subfile)
     if len(vertexFiles) == nrOfInstances:
-        hostnames = GetRunningHosts(ec2)
-        if len(hostnames) < nrOfInstances:
+        if len(targetHosts) < nrOfInstances:
             print("Not enough hosts are running!")
         else:
             for i, subfile in enumerate(vertexFiles):
-                CopyFileToRemote(subfile, hostnames[i], pemfile, targetfilename=vertexfile)
+                CopyFileToRemote(subfile, targetHosts[i], pemfile, targetfilename=vertexfile)
     else:
         print("Could not find all required source vertex files!")
 
@@ -216,8 +229,23 @@ def PerformComputations(ec2, nrOfInstances, pemfile, graphfile, vertexfile):
     return success
 
 
-def GatherResults():
-    print("Implement this please.")
+def GatherResults(targetHosts, filename, outputFilename, pemfile):
+    (filename, ext) = os.path.splitext(filename)
+    copiedFiles = []
+    for i, host in enumerate(targetHosts):
+        targetFilename = filename + "_" + str(i) + ext
+        copiedFile = CopyFileToLocal(filename + ext, host, pemfile, targetfilename=targetFilename)
+        if copiedFile is not None:
+            copiedFiles.append(targetFilename)
+    if len(copiedFiles) == len(targetHosts):
+        print("Copied all files succesfully!")
+        with open(outputFilename, 'w') as output, fileinput.input(files=copiedFiles) as inputfiles:
+            for line in inputfiles:
+                output.write(line)
+            print("Combined all output files in the file %s" % outputFilename)
+    else:
+        print("There was a problem copying the files to local!")
+        print(copiedFiles)
 
 
 def GetImpairedInstances(ec2_client):
@@ -250,12 +278,12 @@ def Main():
     GetImpairedInstances(ec2_client)
     EnsureEnoughInstances(ec2, args.nrofinstances, waitUntilCreated=True, createRealInstances=True)
     ExecuteLocalSSCAlgorithm(args.ssc, args.inputgraph, args.nrofinstances)
-    DistributeFileToHosts(ec2, args.nrofinstances, args.pemfile, "graph.pickle")
-    DistributeSourceVertices(ec2, args.nrofinstances, args.pemfile)
-    DistributeFileToHosts(ec2, args.nrofinstances, args.pemfile, args.ssc)
+    targetHosts = DistributeFileToHosts(ec2, args.nrofinstances, args.pemfile, "graph.pickle")
+    DistributeSourceVertices(ec2, targetHosts, args.nrofinstances, args.pemfile)
+    DistributeFileToHosts(ec2, args.nrofinstances, args.pemfile, args.ssc, targetHosts)
     if PerformComputations(ec2, args.nrofinstances, args.pemfile, "graph.pickle", "sourcevertices.pickle"):
         print("All computations done succesfully.")
-        GatherResults()
+        GatherResults(targetHosts, "output.txt", "output.txt", args.pemfile)
     else:
         print("Some computation went wrong!")
         exit(1)
