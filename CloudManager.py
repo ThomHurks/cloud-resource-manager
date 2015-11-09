@@ -44,11 +44,20 @@ def GetInstances(ec2):
     return instanceData, instanceCount
 
 
-def GetRunningHosts(ec2):
+def GetImpairedInstanceIDs(ec2_client):
+    impairedInstances = []
+    statuses = ec2_client.describe_instance_status()['InstanceStatuses']
+    for status in statuses:
+        if status['SystemStatus']['Status'] == 'impaired' or status['InstanceStatus']['Status'] == 'impaired':
+            impairedInstances.append(status['InstanceId'])
+    return impairedInstances
+
+def GetRunningHosts(ec2, ec2_client):
     hostnames = []
     (instanceData, instanceCount) = GetInstances(ec2)
+    impairedInstances = GetImpairedInstanceIDs(ec2_client)
     for key, (host, state, instance) in instanceData.items():
-        if state == 'running':
+        if state == 'running' and key not in impairedInstances:
             hostnames.append(host)
     return hostnames
 
@@ -119,7 +128,7 @@ def CreateNewInstances(ec2, ec2_client, nr, waitUntilCreated=False, createRealIn
 
 
 def EnsureEnoughInstances(ec2, ec2_client, nrOfInstances, waitUntilCreated=False, createRealInstances=False):
-    runningHosts = GetRunningHosts(ec2)
+    runningHosts = GetRunningHosts(ec2, ec2_client)
     extraRequired = nrOfInstances - len(runningHosts)
     if extraRequired > 0:
         (succceeded, results) = CreateNewInstances(ec2, ec2_client, extraRequired, waitUntilCreated, createRealInstances)
@@ -192,10 +201,10 @@ def CopyFileToLocal(filename, host, pemfile, username='ec2-user', targetfilename
         print("Couldn't find file '%s' which you wanted to copy!" % filename)
 
 
-def DistributeFileToHosts(ec2, nrOfInstances, pemfile, filename, hostnames=None):
+def DistributeFileToHosts(ec2, ec2_client, nrOfInstances, pemfile, filename, hostnames=None):
     if os.path.isfile(filename):
         if hostnames is None or len(hostnames) == 0:
-            hostnames = GetRunningHosts(ec2)
+            hostnames = GetRunningHosts(ec2, ec2_client)
         if len(hostnames) < nrOfInstances:
             print("Not enough hosts are running!")
         else:
@@ -335,11 +344,7 @@ def RebootAllInstances(ec2_client, ec2, waitUntilRunning=False):
 
 
 def RebootImpairedInstances(ec2_client, ec2, waitUntilRunning=False):
-    impairedInstances = []
-    statuses = ec2_client.describe_instance_status()['InstanceStatuses']
-    for status in statuses:
-        if status['SystemStatus']['Status'] == 'impaired' or status['InstanceStatus']['Status'] == 'impaired':
-            impairedInstances.append(status['InstanceId'])
+    impairedInstances = GetImpairedInstanceIDs(ec2_client)
     if len(impairedInstances) > 0:
         print("%d impaired instances found!" % len(impairedInstances))
         RebootInstances(ec2_client, ec2, impairedInstances, waitUntilRunning)
@@ -368,11 +373,11 @@ def Main():
         exit(1)
     ExecuteLocalSSCAlgorithm(args.ssc, args.inputgraph, args.nrofinstances)
     startTime = timer()
-    targetHosts = DistributeFileToHosts(ec2, args.nrofinstances, args.pemfile, "graph.pickle")
+    targetHosts = DistributeFileToHosts(ec2, ec2_client, args.nrofinstances, args.pemfile, "graph.pickle")
     if targetHosts is not None:
         hostToFile = DistributeSourceVertices(ec2, targetHosts, args.nrofinstances, args.pemfile)
         if hostToFile is not None:
-            DistributeFileToHosts(ec2, args.nrofinstances, args.pemfile, args.ssc, targetHosts)
+            DistributeFileToHosts(ec2, ec2_client, args.nrofinstances, args.pemfile, args.ssc, targetHosts)
             endTime = timer()
             preparationTime = endTime - startTime
             startTime = timer()
