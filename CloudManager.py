@@ -9,6 +9,7 @@ import time
 import sys
 import fileinput
 from timeit import default_timer as timer
+import re
 
 __author__ = 'Thom Hurks'
 
@@ -72,7 +73,6 @@ def EnsureAllHostsRunning(ec2, ec2_client, waitUntilRunning=False):
                 break
             else:
                 time.sleep(5)
-
 
 
 def CreateNewInstances(ec2, ec2_client, nr, waitUntilCreated=False, createRealInstance=False):
@@ -195,7 +195,8 @@ def DistributeFileToHosts(ec2, nrOfInstances, pemfile, filename, hostnames=None)
         else:
             targetHosts = []
             print("Copying files to remote hosts...")
-            for host in hostnames:
+            for i in range(0, nrOfInstances):
+                host = hostnames[i]
                 CopyFileToRemote(filename, host, pemfile)
                 targetHosts.append(host)
             return targetHosts
@@ -281,9 +282,16 @@ def GatherResults(targetHosts, filename, outputFilename, pemfile):
             copiedFiles.append(targetFilename)
     if len(copiedFiles) == len(targetHosts):
         print("Copied all files succesfully!")
-        with open(outputFilename, 'w') as output, fileinput.input(files=copiedFiles) as inputfiles:
+        re_vertex = re.compile("(\d+)")
+        uniqueVertices = set()
+        with fileinput.input(files=copiedFiles) as inputfiles:
             for line in inputfiles:
-                output.write(line)
+                result = re_vertex.match(line)
+                if result is not None:
+                    uniqueVertices.add(int(result.group(0)))
+        with open(outputFilename, 'w') as output:
+            for vertex in sorted(uniqueVertices):
+                output.write("%s\n" % str(vertex))
             print("Combined all output files in the file %s" % outputFilename)
     else:
         print("There was a problem copying the files to local!")
@@ -297,8 +305,8 @@ def RebootInstances(ec2_client, ec2, instance_ids, waitUntilRunning=False):
             instance.reboot()
             print("Rebooted instance %s" % key)
     if waitUntilRunning:
+        time.sleep(1)
         while True:
-            time.sleep(1)
             instanceStatuses= ec2_client.describe_instance_status(InstanceIds=instance_ids)['InstanceStatuses']
             for instanceStatus in instanceStatuses:
                 curState = instanceStatus['InstanceState']['Name']
@@ -348,22 +356,29 @@ def Main():
     if args.reboot:
         RebootAllInstances(ec2_client, ec2, waitUntilRunning=True)
         exit(1)
-    startTime = timer()
     EnsureAllHostsRunning(ec2, ec2_client, waitUntilRunning=True)
     RebootImpairedInstances(ec2_client, ec2, waitUntilRunning=True)
     EnsureEnoughInstances(ec2, ec2_client, args.nrofinstances, waitUntilCreated=True, createRealInstances=True)
     ExecuteLocalSSCAlgorithm(args.ssc, args.inputgraph, args.nrofinstances)
+    startTime = timer()
     targetHosts = DistributeFileToHosts(ec2, args.nrofinstances, args.pemfile, "graph.pickle")
     if targetHosts is not None:
         hostToFile = DistributeSourceVertices(ec2, targetHosts, args.nrofinstances, args.pemfile)
         if hostToFile is not None:
             DistributeFileToHosts(ec2, args.nrofinstances, args.pemfile, args.ssc, targetHosts)
+            endTime = timer()
+            preparationTime = endTime - startTime
+            startTime = timer()
             if PerformComputations(ec2, hostToFile, args.nrofinstances, args.pemfile, "graph.pickle", "sourcevertices.pickle"):
                 print("All computations done succesfully.")
+                endTime = timer()
+                computingTime = endTime - startTime
+                startTime = timer()
                 GatherResults(targetHosts, "output.txt", "output.txt", args.pemfile)
                 endTime = timer()
-                elapsed = endTime - startTime
-                print("Time elapsed: %s" % str(elapsed))
+                gatherTime = endTime - startTime
+                print("Time spent preparing: %s seconds. Time spent computing: %s. Time spent gathering: %s" %
+                      (str(preparationTime), str(computingTime), str(gatherTime)))
             else:
                 print("Some computation went wrong!")
                 exit(1)
