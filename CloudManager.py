@@ -105,12 +105,16 @@ def CreateNewInstances(ec2, ec2_client, nr, waitUntilCreated=False, createRealIn
             succceeded = True
     except ClientError as e:
         errorCode = e.response['Error']['Code']
+        succceeded = False
         if errorCode == 'DryRunOperation':
             succceeded = True
             print("Success!")
         elif errorCode == 'UnauthorizedOperation':
-            succceeded = False
-            print("Failed!")
+            print("Not authorized to create new instance!")
+        elif errorCode == "InstanceLimitExceeded":
+            print("Already created the maximum amount of instances!")
+        else:
+            print("Encountered unknown error %s." % errorCode)
     return succceeded, results
 
 
@@ -127,8 +131,10 @@ def EnsureEnoughInstances(ec2, ec2_client, nrOfInstances, waitUntilCreated=False
                 print("No instances actually added. This was probably a dry run.")
         else:
             print("Couldn't ensure the required number of instances!")
+        return succceeded
     else:
         print("Already enough instances!")
+        return True
 
 
 def ExecuteRemoteCommand(command, hostname, pemfile, waitUntilDone=False, username='ec2-user'):
@@ -358,7 +364,8 @@ def Main():
         exit(1)
     EnsureAllHostsRunning(ec2, ec2_client, waitUntilRunning=True)
     RebootImpairedInstances(ec2_client, ec2, waitUntilRunning=True)
-    EnsureEnoughInstances(ec2, ec2_client, args.nrofinstances, waitUntilCreated=True, createRealInstances=True)
+    if not EnsureEnoughInstances(ec2, ec2_client, args.nrofinstances, waitUntilCreated=True, createRealInstances=True):
+        exit(1)
     ExecuteLocalSSCAlgorithm(args.ssc, args.inputgraph, args.nrofinstances)
     startTime = timer()
     targetHosts = DistributeFileToHosts(ec2, args.nrofinstances, args.pemfile, "graph.pickle")
