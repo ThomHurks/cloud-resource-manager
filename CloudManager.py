@@ -382,7 +382,6 @@ def Main():
             else:
                 print("Some computation went wrong!")
                 exit(1)
-    ShowAllRemoteFiles(ec2, args.pemfile)
 
 
 if __name__ == "__main__":
