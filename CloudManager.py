@@ -377,8 +377,10 @@ def Main():
                 GatherResults(targetHosts, "output.txt", "output.txt", args.pemfile)
                 endTime = timer()
                 gatherTime = endTime - startTime
-                print("Time spent preparing: %s seconds. Time spent computing: %s. Time spent gathering: %s" %
-                      (str(preparationTime), str(computingTime), str(gatherTime)))
+                print("Time spent preparing: %s secs. Time spent computing: %s secs. Time spent gathering: %s secs. "
+                      "Total time: %s secs" %
+                      (str(preparationTime), str(computingTime), str(gatherTime),
+                       str(preparationTime + computingTime + gatherTime)))
             else:
                 print("Some computation went wrong!")
                 exit(1)
