@@ -26,7 +26,7 @@ def ParseArgs():
     parser.add_argument('--ssc', action='store', required=False, type=ExistingFile, help='The location of the SSC algorithm.', metavar='ssc')
     parser.add_argument('--nrofinstances', action='store', required=False, type=int, help='The nr of instances that should be launched.', metavar='nrofinstances')
     parser.add_argument('--inputgraph', action='store', required=False, type=ExistingFile, help='The input graph in text format.', metavar='inputgraph')
-
+    parser.add_argument('--reboot', action='store_true', required=False, help='Reboot all instances.')
     return parser.parse_args()
 
 
@@ -54,19 +54,28 @@ def GetRunningHosts(ec2):
 
 def EnsureAllHostsRunning(ec2, ec2_client, waitUntilRunning=False):
     (instanceData, instanceCount) = GetInstances(ec2)
+    rebootedInstanceIDs = []
     for key, (host, state, instance) in instanceData.items():
         if state != 'running' and state != 'pending' and state != 'terminated':  # shutting-down | stopping | stopped
             instance.reboot()
-            if waitUntilRunning:
-                curState = instance.state['Name']
-                while curState != 'running':
-                    print("State of new instance %s is currently %s" % (instance.id, curState))
-                    time.sleep(5)
-                    curState = ec2_client.describe_instance_status(InstanceIds=[instance.id])['InstanceStatuses']['InstanceState']['Name']
-            print("Rebooted existing instance: '%s'" % str(instance))
+            rebootedInstanceIDs.append(instance.id)
+            print("Rebooted existing instance: '%s'" % str(instance.id))
+    if waitUntilRunning and len(rebootedInstanceIDs) > 0:
+        time.sleep(1)
+        while True:
+            instanceStatuses = ec2_client.describe_instance_status(InstanceIds=rebootedInstanceIDs)['InstanceStatuses']
+            for instanceStatus in instanceStatuses:
+                curState = instanceStatus['InstanceState']['Name']
+                if curState == 'running' or curState == 'terminated':
+                    rebootedInstanceIDs.remove(instanceStatus['InstanceId'])
+            if len(rebootedInstanceIDs) == 0:
+                break
+            else:
+                time.sleep(5)
 
 
-def CreateNewInstances(ec2, nr, waitUntilCreated=False, createRealInstance=False):
+
+def CreateNewInstances(ec2, ec2_client, nr, waitUntilCreated=False, createRealInstance=False):
     succceeded = False
     results = None
     try:
@@ -76,12 +85,23 @@ def CreateNewInstances(ec2, nr, waitUntilCreated=False, createRealInstance=False
                                        KeyName='amazon', DryRun=(not createRealInstance))
         if results is not None and len(results) > 0:
             for newInstance in results:
-                if waitUntilCreated:
-                    while newInstance.state['Name'] != 'running':
-                        print("State of new instance %s is currently %s" % (newInstance.id, newInstance.state['Name']))
-                        time.sleep(5)
-                        newInstance.update()
                 print("Created new instance: '%s'" % str(newInstance))
+            if waitUntilCreated:
+                newInstanceIDs = []
+                for newInstance in results:
+                    newInstanceIDs.append(newInstance.id)
+                time.sleep(1)
+                while True:
+                    instanceStatuses = ec2_client.describe_instance_status(InstanceIds=newInstanceIDs)['InstanceStatuses']
+                    for instanceStatus in instanceStatuses:
+                        curState = instanceStatus['InstanceState']['Name']
+                        print("State of new instance %s is currently %s" % (instanceStatus['InstanceId'], curState))
+                        if curState == 'running':
+                            newInstanceIDs.remove(instanceStatus['InstanceId'])
+                    if len(instanceStatuses) == 0:
+                        break
+                    else:
+                        time.sleep(5)
             succceeded = True
     except ClientError as e:
         errorCode = e.response['Error']['Code']
@@ -94,11 +114,11 @@ def CreateNewInstances(ec2, nr, waitUntilCreated=False, createRealInstance=False
     return succceeded, results
 
 
-def EnsureEnoughInstances(ec2, nrOfInstances, waitUntilCreated=False, createRealInstances=False):
+def EnsureEnoughInstances(ec2, ec2_client, nrOfInstances, waitUntilCreated=False, createRealInstances=False):
     runningHosts = GetRunningHosts(ec2)
     extraRequired = nrOfInstances - len(runningHosts)
     if extraRequired > 0:
-        (succceeded, results) = CreateNewInstances(ec2, extraRequired, waitUntilCreated, createRealInstances)
+        (succceeded, results) = CreateNewInstances(ec2, ec2_client, extraRequired, waitUntilCreated, createRealInstances)
         if succceeded:
             if results is not None:
                 for result in results:
@@ -151,7 +171,8 @@ def ExecuteLocalSSCAlgorithm(SSC_program, input_graph, nrOfInstances):
 
 def CopyFileToRemote(filename, host, pemfile, username='ec2-user', targetfilename=""):
     try:
-        ExecuteLocalCommand("scp -i %s %s %s@%s:~/%s" % (pemfile, filename, username, host, targetfilename))
+        ExecuteLocalCommand("scp -i %s -o StrictHostKeyChecking=no -C %s %s@%s:~/%s" % (pemfile, filename, username, host, targetfilename))
+        print("Copied file %s to host %s." % (filename, host))
     except FileNotFoundError:
         print("Couldn't find file '%s' which you wanted to copy!" % filename)
 
@@ -173,6 +194,7 @@ def DistributeFileToHosts(ec2, nrOfInstances, pemfile, filename, hostnames=None)
             print("Not enough hosts are running!")
         else:
             targetHosts = []
+            print("Copying files to remote hosts...")
             for host in hostnames:
                 CopyFileToRemote(filename, host, pemfile)
                 targetHosts.append(host)
@@ -193,6 +215,7 @@ def DistributeSourceVertices(ec2, targetHosts, nrOfInstances, pemfile, vertexfil
             print("Not enough hosts are running!")
         else:
             hostToFile = dict()
+            print("Copying files to remote hosts...")
             for i, subfile in enumerate(vertexFiles):
                 CopyFileToRemote(subfile, targetHosts[i], pemfile, targetfilename=vertexfile)
                 hostToFile[targetHosts[i]] = subfile
@@ -267,30 +290,45 @@ def GatherResults(targetHosts, filename, outputFilename, pemfile):
         print(copiedFiles)
 
 
+def RebootInstances(ec2_client, ec2, instance_ids, waitUntilRunning=False):
+    (instanceData, instanceCount) = GetInstances(ec2)
+    for key, (host, state, instance) in instanceData.items():
+        if key in instance_ids:
+            instance.reboot()
+            print("Rebooted instance %s" % key)
+    if waitUntilRunning:
+        while True:
+            time.sleep(1)
+            instanceStatuses= ec2_client.describe_instance_status(InstanceIds=instance_ids)['InstanceStatuses']
+            for instanceStatus in instanceStatuses:
+                curState = instanceStatus['InstanceState']['Name']
+                if curState == 'running' or curState == 'terminated':
+                    instance_ids.remove(instanceStatus['InstanceId'])
+            if len(instance_ids) == 0:
+                break
+            else:
+                time.sleep(5)
+        print("All rebooted instances are now running!")
+
+
+def RebootAllInstances(ec2_client, ec2, waitUntilRunning=False):
+    (instanceData, _) = GetInstances(ec2)
+    ids = []
+    for key in instanceData.keys():
+        ids.append(key)
+    print("Rebooting all %d instances." % len(ids))
+    RebootInstances(ec2_client, ec2, ids, waitUntilRunning)
+
+
 def RebootImpairedInstances(ec2_client, ec2, waitUntilRunning=False):
     impairedInstances = []
     statuses = ec2_client.describe_instance_status()['InstanceStatuses']
     for status in statuses:
-        if status['SystemStatus'] == 'impaired' or status['InstanceStatus'] == 'impaired':
+        if status['SystemStatus']['Status'] == 'impaired' or status['InstanceStatus']['Status'] == 'impaired':
             impairedInstances.append(status['InstanceId'])
     if len(impairedInstances) > 0:
         print("%d impaired instances found!" % len(impairedInstances))
-        (instanceData, instanceCount) = GetInstances(ec2)
-        for key, (host, state, instance) in instanceData.items():
-            if key in impairedInstances:
-                instance.reboot()
-                print("Rebooted impaired instance %s" % key)
-        if waitUntilRunning:
-            while True:
-                for impairedInstance in impairedInstances:
-                    curState = ec2_client.describe_instance_status(InstanceIds=[impairedInstance])['InstanceStatuses']['InstanceState']['Name']
-                    if curState == 'running' or curState == 'terminated':
-                        impairedInstances.remove(impairedInstance)
-                if len(impairedInstances) == 0:
-                    break
-                else:
-                    time.sleep(5)
-            print("All rebooted impaired instances are now running!")
+        RebootInstances(ec2_client, ec2, impairedInstances, waitUntilRunning)
     else:
         print("All running instances are healthy.")
 
@@ -307,10 +345,13 @@ def Main():
     args = ParseArgs()
     ec2 = boto3.resource('ec2')
     ec2_client = boto3.client('ec2')
+    if args.reboot:
+        RebootAllInstances(ec2_client, ec2, waitUntilRunning=True)
+        exit(1)
     startTime = timer()
     EnsureAllHostsRunning(ec2, ec2_client, waitUntilRunning=True)
     RebootImpairedInstances(ec2_client, ec2, waitUntilRunning=True)
-    EnsureEnoughInstances(ec2, args.nrofinstances, waitUntilCreated=True, createRealInstances=True)
+    EnsureEnoughInstances(ec2, ec2_client, args.nrofinstances, waitUntilCreated=True, createRealInstances=True)
     ExecuteLocalSSCAlgorithm(args.ssc, args.inputgraph, args.nrofinstances)
     targetHosts = DistributeFileToHosts(ec2, args.nrofinstances, args.pemfile, "graph.pickle")
     if targetHosts is not None:
