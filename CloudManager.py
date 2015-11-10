@@ -52,6 +52,7 @@ def GetImpairedInstanceIDs(ec2_client):
             impairedInstances.append(status['InstanceId'])
     return impairedInstances
 
+
 def GetRunningHosts(ec2, ec2_client):
     hostnames = []
     (instanceData, instanceCount) = GetInstances(ec2)
